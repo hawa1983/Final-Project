@@ -1,0 +1,826 @@
+---
+title: "DATA 606 Final Project"
+author: "Fomba Kassoh & Souleymane Doumbia"
+date: "2023-11-19"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  pdf_document:
+    toc: true
+  ioslides_presentation:
+    widescreen: true
+  slidy_presentation:
+    incremental: true
+---
+
+
+```{r setup, include=FALSE}
+# Custom CSS for scrollable tables
+htmltools::tags$style("
+  .scrollable-container {
+    height: 50px;
+    overflow-y: auto;
+  }
+  .table {
+    width: 100%;
+    max-width: none;
+  }
+")
+```
+
+# Abstract
+The goal of this analysis was to determine the most appropriate regression model for COVID-19 case data, specifically looking at the daily counts of cases, hospitalizations, and deaths for the years 2021 and 2022. The data exhibited characteristics typical of count data, including right-skewness and overdispersion, challenging the assumptions of standard linear regression models.
+
+Initial diagnostics using histograms, Q-Q plots, and boxplots revealed that the distributions of the variables were not normally distributed and contained outliers. The Q-Q plots, in particular, showed significant deviations from the theoretical quantiles of a normal distribution, indicating heavy-tailed distributions for all three variables. Scatter plots suggested nonlinear relationships and potential associations among the variables.
+
+Given these preliminary findings, a standard linear regression model was deemed unsuitable due to the non-normality of residuals and heteroscedasticity. Consequently, we explored Generalized Linear Models (GLMs) with different distributions that are more robust to the peculiarities of count data.
+
+A Poisson GLM was initially considered, as it is a common choice for modeling count data. However, diagnostic checks indicated significant overdispersion and the presence of outliers, which the Poisson model inherently cannot handle, as it assumes the mean and variance of the data to be equal.
+
+To address the overdispersion, a Negative Binomial GLM was fitted, which introduces an additional parameter to account for the variance exceeding the mean. Subsequent diagnostic plots revealed an improved fit over the Poisson model, with reduced issues of overdispersion and fewer influential outliers, as evidenced by Cook's distance.
+
+The analyses suggest that for count data exhibiting overdispersion and skewness, as is often the case in epidemiological data, Negative Binomial regression provides a better fit than both linear and Poisson regression models. This model adequately addresses the variance structure of the data, providing more reliable estimates for the effects of hospitalizations and cases on COVID-19-related deaths. For accurate modeling of such data, it is crucial to consider the underlying distribution and employ a model that can capture its nuances.
+
+
+
+# Overview
+
+
+## Context of Data Collection
+The data used in this analysis is comprised of Covid-19 death and hospitalization counts. The data was retrieved from the NYC OpenData portal.The data can be view by following the following link. https://data.cityofnewyork.us/Health/COVID-19-Daily-Counts-of-Cases-Hospitalizations-an/rc75-m7u3. The COVID-19 Daily Counts of Cases, Hospitalizations, and Death are observed by the NYS Department of Health and are publicly available. The data can be retried through an API end point or by downloading a csv or json format files.We are using the following API end point. https://data.cityofnewyork.us/resource/rc75-m7u3.csv. The following is the context of the Covid-19 data collection:
+
+**Early Pandemic (Early 2020):** Limited testing led to potential under reporting.
+**Expanded Data Collection (Mid-2020):** By mid-2020, testing became more widespread, allowing for more comprehensive data collection, including test positivity rates and detailed demographic information.
+**Vaccination Rollout (Late 2020/Early 2021):** Vaccination data started being collected around December 2020 to early 2021, as COVID-19 vaccines were approved and began to be administered worldwide.
+**Impact of Public Health Campaigns (Throughout 2020 and 2021):** Throughout 2020 and into 2021, public health campaigns, particularly for vaccination and preventive measures, likely influenced the trends observed in the data.
+**Adaptation to Variants (2021 Onwards):** Starting in 2021, with the emergence of variants like Delta and later Omicron, continuous monitoring became crucial to assess vaccine effectiveness against these new strains.
+**Long-Term Monitoring (2021 Onwards):** As the pandemic progressed into 2021 and beyond, the focus shifted to long-term effects of COVID-19, enduring vaccine efficacy, and evaluating the impact of different public health policies.
+
+### What are the variables in the data
+The variables in the data as show below
+
+Load the data
+```{r}
+library(tidyverse)
+library(readr)
+# Loading the dataset using the provided API
+file_path <- 'https://data.cityofnewyork.us/resource/rc75-m7u3.csv'
+covid_data <- read_csv(file_path)
+
+# Displaying the first few rows of the dataset to understand its structure
+glimpse(covid_data)
+
+```
+
+## Description of Dependent and Independent Variables
+
+### Dependent Variable (death_count):
+This is the outcome or response variable that we are trying to predict or explain.
+In the context of COVID-19, "Death Count" represents the number of deaths attributed to the virus on a given day.
+Independent Variables:
+
+### Independent Variables
+We are using the following two independent variable for our analysis:
+
+#### hospitalized_count
+This variable represents the number of people hospitalized due to COVID-19 on a given day. It's an independent variable because it is presumed to influence or explain the variation in the death count.
+
+### case_count
+This is the total number of new confirmed COVID-19 cases. As with hospitalizations, this variable is used to predict or explain changes in the death count.
+
+## Research Question
+"How do the number of COVID-19 hospitalizations and case counts predict or influence the number of COVID-19 related deaths?"
+
+# Summary Statistics
+Based on the context of data collection, 2020 does not include vaccination and wide scale data collection. We have therefore excluded it from the analysis so that the condition/context under which data was collected is similar. The data set from the portal does not include 2023. We are there using the data for 2021 and 2022 for our analysis. 
+
+## Determine if there are missing values in any column
+Base on the search for missing values below, there are no missing values.
+```{r}
+# Use dplyr and tidyr to find missing data
+covid_data %>%
+  summarise_all(~ sum(is.na(.)))
+```
+
+## Summary Statistics
+The summary statistics below shows considerable variability in daily cases, hospitalizations, and deaths, likely reflecting the waves and changing dynamics of the COVID-19 pandemic during 2021 and 2022. The median of all three metrics (cases, hospitalizations, deaths) lower than the mean, pointing to a right-skewed distribution.The right-skewed distributions suggest that most days were on the lower end of the spectrum, but there were periods with significantly higher counts.
+The wide range between the minimum and maximum values for each metric highlights the fluctuating intensity of the pandemic over these years.
+```{r}
+library(dplyr)
+
+# Convert 'date_of_interest' to Date and filter the data for 2021 and 2022
+covid_data_2021_2022 <- covid_data %>%
+  filter(as.integer(format(date_of_interest, "%Y")) %in% c(2021, 2022))
+
+# Select relevant columns for summary statistics
+relevant_data_2021_2022 <- select(covid_data_2021_2022, case_count, hospitalized_count, death_count)
+
+# Generate summary statistics for the selected columns (2021 and 2022 data)
+summary_statistics <- relevant_data_2021_2022 %>%
+  summarise(across(c(case_count, hospitalized_count, death_count),
+                   list(mean = ~ mean(., na.rm = TRUE),
+                        median = ~ median(., na.rm = TRUE),
+                        sd = ~ sd(., na.rm = TRUE),
+                        min = ~ min(., na.rm = TRUE),
+                        max = ~ max(., na.rm = TRUE)))) %>%
+  pivot_longer(cols = everything(), names_to = c(".value", "statistic"), names_pattern = "(.*)_(.*)")
+
+# Display the summary statistics
+print(summary_statistics)
+```
+# Appropiate Visualizations
+
+## Histogram of Death Count (Left Plot):
+
+The histogram for all three metrics (cases, hospitalizations, deaths) shows a right-skewed distribution, indicating that most of the days had lower case, hospitalization, and death counts. The peak of the distributions is towards the lower end, suggesting that on many days, the counts were relatively low. The long tail to the right indicates that there were days with significantly higher counts, although these were less frequent.
+
+## Box Plot of Death Count (Right Plot):
+
+The box plot further illustrates the skewed nature of the data. The median (indicated by the line inside the box) is closer to the lower quartile, which aligns with the histogram showing a concentration of data on the lower end. The presence of several points above the upper whisker indicates outliers, representing days with unusually high death counts.The interquartile range (the box) is relatively small compared to the range of the entire dataset, underscoring the skewness and the presence of extreme values on certain days.
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+
+# Function to create combined histogram and box plot
+combined_plot <- function(data, column_name, title, xlabel) {
+  numeric_data <- data[[column_name]]
+
+  histogram_plot <- ggplot(data.frame(x = numeric_data), aes(x = x)) +
+                    geom_histogram(bins = 60, fill = 'skyblue', alpha = 0.7) +
+                    labs(title = title, x = xlabel, y = 'Frequency') +
+                    theme_minimal()
+
+  boxplot_plot <- ggplot(data.frame(x = numeric_data), aes(x = x, y = '')) +
+                  geom_boxplot(fill = 'lightgreen') +
+                  labs(y = 'Value') +
+                  theme_minimal() +
+                  theme(axis.title.x = element_blank(),
+                        axis.text.x = element_blank(),
+                        axis.ticks.x = element_blank())
+
+  list(histogram_plot, boxplot_plot)
+}
+
+# Generate plots for each column
+case_count_plots <- combined_plot(covid_data_2021_2022, 'case_count', 'Histogram and Box Plot of Case Count (2021-2022)', 'Case Count')
+hospitalized_count_plots <- combined_plot(covid_data_2021_2022, 'hospitalized_count', 'Histogram and Box Plot of Hospitalized Count (2021-2022)', 'Hospitalized Count')
+death_count_plots <- combined_plot(covid_data_2021_2022, 'death_count', 'Histogram and Box Plot of Death Count (2021-2022)', 'Death Count')
+
+# Arrange all plots in a grid layout
+grid.arrange(grobs = c(case_count_plots, hospitalized_count_plots, death_count_plots), ncol = 2)
+
+
+```
+
+```{r}
+
+library(ggplot2)
+library(gridExtra)
+
+
+# Convert date_of_interest to a Date or year format if it's not already
+covid_data$date_of_interest <- as.Date(covid_data$date_of_interest)
+
+# Filter for 2021 and 2022
+covid_data_2021_2022 <- covid_data[format(covid_data$date_of_interest, "%Y") %in% c("2021", "2022"), ]
+
+# Function to create a Q-Q plot using ggplot2
+create_qq_plot <- function(data, variable) {
+    data_vector <- na.omit(data[[variable]])
+    ggplot(data.frame(data_vector), aes(sample = data_vector)) + 
+        stat_qq() +
+        ggtitle(paste('Q-Q Plot for', toupper(substring(variable, 1, 1)), substring(variable, 2))) +
+        theme_minimal() 
+        
+}
+
+# Create plots for each variable
+p1 <- create_qq_plot(covid_data_2021_2022, 'case_count')
+p2 <- create_qq_plot(covid_data_2021_2022, 'hospitalized_count')
+p3 <- create_qq_plot(covid_data_2021_2022, 'death_count')
+
+grid.arrange(p1, p2, p3, ncol = 2)
+
+# You can view them individually by just typing their names in the console
+
+
+```
+
+## Scatter plots for the filtered dataset (2021-2022)
+
+**Death Count vs. Case Count**
+The plot shows a non-linear relationship between the case count and death count. There appears to be a positive association; as case counts increase, death counts also tend to increase. However, the relationship does not seem to be linear, especially at higher case counts where the increase in death count is not proportional. There is a clear pattern indicating possible exponential or polynomial growth.
+
+**Death Count vs. Hospitalized Count**
+This plot also indicates a positive relationship between hospitalized count and death count, with a similar non-linear pattern. As with case count, the increase in death count does not seem linearly proportional to the increase in hospitalized count, especially at higher values.
+
+**Appropriate Regression Model**
+Given the non-linear patterns observed in both scatter plots, a linear regression model may not provide the best fit for the data. Possible approaches to modeling these relationships could include
+
+1. Polynomial Regression: To capture the curvature in the relationship, a polynomial term could be added to a linear regression model.
+2. Generalized Linear Models (GLMs): If the relationship seems to be exponential, a GLM with a log link function could be appropriate.
+3. Non-Parametric Regression: Methods like local regression (LOESS) could be used if the relationship is complex and not easily captured by standard parametric models.
+
+Data Appropriateness for Inference:
+
+Relationship: The presence of a clear pattern in both plots is a good sign that there is a relationship to be modeled, but the non-linearity needs to be addressed.
+Variability: The spread of points around the 'line of best fit' will affect the model's predictive power. There seems to be increasing variability with higher counts, which suggests heteroscedasticity.
+Outliers: There do not appear to be as many extreme outliers in these scatter plots as in the histograms and box plots previously analyzed, but the dense clustering at the lower end could make it difficult to discern any outliers that might exist.
+
+Independence: Assuming the data points (days) are independent of each other, this condition for inference is likely met, although if data are from time series, temporal autocorrelation should be checked.
+Before proceeding with model selection, it would be prudent to conduct further exploratory data analysis, including checking for overdispersion, examining residuals for any chosen model, and considering transformations or more complex models if necessary. For time-series data, accounting for temporal autocorrelation would be essential.
+
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+
+# Scatter plot for CASE_COUNT vs DEATH_COUNT
+scatter_plot_cases <- ggplot(covid_data_2021_2022, aes(x=case_count, y=death_count)) +
+  geom_point(alpha=0.6) +
+  ggtitle('Death Count vs Case Count (2021-2022)') +
+  xlab('Case Count') +
+  ylab('Death Count')
+
+# Scatter plot for HOSPITALIZED_COUNT vs DEATH_COUNT
+scatter_plot_hospitalized <- ggplot(covid_data_2021_2022, aes(x=hospitalized_count, y=death_count)) +
+  geom_point(alpha=0.6) +
+  ggtitle('Death Count vs Hospitalized Count (2021-2022)') +
+  xlab('Hospitalized Count') +
+  ylab('Death Count')
+
+# Arrange the plots side by side
+grid.arrange(scatter_plot_cases, scatter_plot_hospitalized, ncol = 1)
+
+```
+
+**Selection of Appropriate Regression Model Based on Visualizations:**
+
+**Linear Regression Model**
+Given the skewness of the data and the presence of outliers shown by the historams and box plots, a linear regression model might not be the best fit. The presence of outliers and the skewness indicate that the assumptions of normality and homoscedasticity (constant variance) for linear regression are likely violated. The Q-Q plots suggest that none of the variables follow a normal distribution, which is typical for count data like cases, hospitalizations, and deaths related to diseases. This non-normality means that assumptions required for certain statistical inference methods and for linear regression may not be met.
+
+**Poison Regression Model**
+Given the overdispersion and skewness in the data, a Poisson regression model may not be appropriate because it assumes that the mean and variance of the data are equal. The overdispersion observed here can lead to underestimated standard errors and thus inflated test statistics, leading to incorrect inferences.
+
+**Negative Binomial Model**
+A Negative Binomial regression model would likely be more appropriate for this data, as it can model the count data with overdispersion. It adds an extra parameter to account for the overdispersion, which can provide more reliable estimates of the standard errors and a better fit to the data.
+
+# Statistical Output
+
+## Hypothesis Test
+
+***Hypothesis Statement***
+Null Hypothesis (H0): There is no statistical association between the number of hospitalizations ('hospitalized_count') and the number of deaths ('death_count') due to COVID-19. Any observed association in the data is due to random chance.
+
+Alternative Hypothesis (H1): There is a statistically significant association between the number of hospitalizations ('hospitalized_count') and the number of deaths ('death_count') due to COVID-19. The observed association is not due to random chance.
+
+Since the relationship appears to be linear in the scatter plot, I would be comfortable using a linear regression model to predict death_count based on hospitalized_count. To make the prediction, I would check for linearity by calculating the $R^2$, evaluating the residuals, and using statistical tests, to confirm the suitability of the linear model.
+```{r}
+ggplot(covid_data_2021_2022, aes(x=hospitalized_count, y=death_count)) +
+  geom_point() +
+  labs(x = "Hospitalization Count", y = "Death Count") +
+  ggtitle("Scatter Plot of hospitalized_count vs. death_count")
+```
+
+Since the relationship looks linear, we can quantify the strength of the relationship with the correlation coefficient.The correlation coefficient of 0.71 indicates that there is a strong relationship between death_count and hospitalized_count
+
+
+Given a strong positive correlation coefficient of 0.71 and a very small p-value, we can conclude with high confidence that there is a significant and strong positive linear relationship between the number of hospitalizations and the number of deaths in the COVID-19 data. This result is statistically significant, meaning that it's highly unlikely to have occurred by chance.
+
+## Pearson's Correlation
+```{r cor}
+library(infer)
+library(dplyr)
+
+# Assuming covid_data_2021_2022 is your data frame
+result <- covid_data_2021_2022 %>%
+  summarise(
+    correlation_coefficient = cor(hospitalized_count, death_count, use = "complete.obs"),
+    p_value = cor.test(hospitalized_count, death_count, use = "complete.obs")$p.value
+  )
+
+# Displaying the results
+print(result)
+
+
+```
+
+## Spearman's Correlation
+Since our data is skewed and have outliers, we will calculate the Spearman's correlation coefficient and p-value for comparison purpose. Spearman's correlation is a non-parametric measure of rank correlation, making it more appropriate for data that are not normally distributed or have outliers.
+
+In comparison to the Pearsons correlation coefficient and p-value agrees with the Pearsons method ndicating that there is a strong relationship between death_count and hospitalized_count.
+```{r}
+
+# Perform Pearson's correlation test
+correlation_test <- cor.test(covid_data_2021_2022$hospitalized_count, covid_data_2021_2022$death_count)
+
+# Output results
+print(paste("Pearson's Correlation Coefficient:", correlation_test$estimate))
+print(paste("P-value:", correlation_test$p.value))
+
+
+```
+## Conclusion of Hypothesis Test:
+Given the p-value is less than 0.05, we reject the Null Hypothesis (H0). There is statistically significant evidence to suggest an association between the number of hospitalizations and the number of deaths due to COVID-19. The strength and direction of this relationship, as indicated by the correlation coefficient suggest that as hospitalizations increase, deaths tend to increase as well, and this relationship is not due to random chance.
+
+### Important Considerations:
+While we reject the null hypothesis and accept the alternative, it's crucial to remember that correlation does not imply causation. The observed association might be influenced by various other factors such as vaccination and public heath campaigns. 
+
+
+## Regression
+### Simple Linear Regression with Ratings
+
+Next, we will fit a simple linear model to predict death count by hospitalization count.
+    
+```{r crreating m_bty}
+covid_death_simple <- lm(death_count ~ hospitalized_count, data = covid_data_2021_2022)
+summary(covid_death_simple)
+```
+Equation of the simple linear regression
+
+\[
+  \widehat{death_count} = 6.462660 + 0.111618 \times hospitalized\_count
+\]
+
+**Interpretation of slope:** For each one-unit increase in hospitalization count, the death count is expected to increase by approximately 0.111618.
+
+**Statistical Significance:** The p-value in the linear model is 2.2×10^-16. The p-value is significantly less than 0.05. This indicates that hospitalization count is a statistically significant predictor of the death count from Covid-19 in this dataset.
+
+**Practical Significance:** 'Hospitalized_count' appears to be both a statistically and practically significant predictor of 'death_count' in the context of COVID-19 data. The model suggests a meaningful relationship between the number of hospitalizations and the number of deaths, highlighting the importance of hospitalization data in understanding and managing the impact of the COVID-19 pandemic.
+
+
+### Multiple Linear Regression with Ratings
+```{r}
+
+death_count_multiple <- lm(death_count ~ hospitalized_count + case_count, data = covid_data_2021_2022)
+summary(death_count_multiple)
+
+```
+
+Equation of the simple linear regression
+
+\[
+  \widehat{death_count} = 0.3850311 + 0.2231491 \times hospitalized\_count - 0.0036866 \times case\_count
+\]
+
+
+**Interpretation of Coefficients:**
+
+1. Hospitalized Count: The coefficient is 0.2231491, indicating that for each additional hospitalization, the model predicts an increase of approximately 0.223 deaths, holding 'case_count' constant. This is a sizable effect and suggests practical significance.
+
+2. Case Count: The coefficient is -0.0036866. This negative coefficient implies that for each additional case, the model predicts a slight decrease in the number of deaths, holding 'hospitalized_count' constant. This is counterintuitive and requires careful interpretation.
+
+**Statistical Significance:**
+
+Both 'hospitalized_count' and 'case_count' have p-values much less than 0.05, indicating that their relationships with 'death_count' are statistically significant.
+
+**Practical Significance:**
+
+The practical significance of 'hospitalized_count' is clear, given its positive and relatively large coefficient.
+The practical significance of 'case_count' is less clear due to the negative coefficient, which may suggest a more complex relationship. It might have been influenced by factors like healthcare capacity increase and treatment advancements, or varying severities of cases over time.
+
+**Model Fit:**
+
+The 'Multiple R-squared' value is 0.7241, meaning that about 72.41% of the variability in 'death_count' is explained by the model. This is a strong model fit, especially for observational data.
+
+### Poisson or Negative Binomial Regression with Rating Count
+Since rating count is a count variable, you'd likely use a Poisson or negative binomial regression, which are suitable for modelling count data.
+
+```{r poison regression}
+death_count_poison <- glm(death_count ~ hospitalized_count + case_count, 
+                          data = covid_data_2021_2022, 
+                          family = 'poisson'
+                          )
+summary(death_count_poison)
+```
+### Conclusion of Poison Regression:
+'Hospitalized_count' is a statistically significant predictor of 'death_count', with more hospitalizations associated with an increase in the number of deaths. 'Case_count' shows a statistically significant but negative relationship with 'death_count' in the model. This might reflect complex dynamics, such as improvements in treatment over time, changes in testing strategies, or varying severity of cases.
+
+## Diagnostic plots and analysis.
+
+```{r conducting dignostic on m_final model above}
+# Add residuals and fitted values to the data frame
+covid_data_2021_2022 <- covid_data_2021_2022 %>%
+  mutate(fitted_values = fitted(death_count_multiple),
+         residuals = resid(death_count_multiple),
+         sqrt_abs_resid = sqrt(abs(residuals)),
+         leverage = hatvalues(death_count_multiple))
+
+# Creating the plots
+p16_1 <- ggplot(covid_data_2021_2022, aes(x = fitted_values, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  labs(title = "Residuals vs Fitted", x = "Fitted values", y = "Residuals")
+
+p16_2 <- ggplot(covid_data_2021_2022, aes(sample = residuals)) +
+  stat_qq() +
+  stat_qq_line(slope=1, intercept=0, color="red", linetype="dashed") +
+  labs(title = "Normal Q-Q", x = "Theoretical Quantiles", y = "Sample Quantiles")
+
+p16_3 <- ggplot(covid_data_2021_2022, aes(x = fitted_values, y = sqrt_abs_resid)) +
+  geom_point() +
+  labs(title = "Scale-Location Plot", x = "Fitted values", y = "Sqrt(|Residuals|)")
+
+p16_4 <- ggplot(covid_data_2021_2022, aes(x = leverage, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  labs(title = "Residuals vs Leverage", x = "Leverage", y = "Residuals")
+
+grid.arrange(p16_1, p16_2, p16_3, p16_4, ncol = 2, nrow = 2)
+```
+
+The provided diagnostic plots are common tools used to evaluate the assumptions of a linear regression model. Here's how to interpret each of them:
+
+**Residuals vs Fitted:**
+In this plot, there appears to be a pattern where the residuals show a non-linear trend, suggesting potential issues with linearity. There is also a "funnel" shape, indicating potential heteroscedasticity.
+
+**Normal Q-Q:**
+The plot shows that lower and higher quantiles deviate from the line, indicating that the residuals may not be normally distributed, with potential issues at both tails.
+
+**Scale-Location (or Spread-Location):**
+
+The plot indicates that residuals might be heteroscedastic since the spread of residuals appears to increase with the fitted values.
+
+**Residuals vs Leverage:**
+
+There are several points with higher leverage, but they do not appear to have large residuals, suggesting they are not unduly influencing the model.
+
+**Overall Interpretation:**
+The plots suggest that there are potential violations of the linear regression assumptions:
+
+**Non-Linearity:** The 'Residuals vs Fitted' plot indicates potential non-linearity in the relationship between the predictors and the response variable.
+**Non-Normality of Residuals:** The 'Normal Q-Q' plot suggests that residuals are not normally distributed, particularly at the tails.
+**Heteroscedasticity:** Both the 'Residuals vs Fitted' and 'Scale-Location' plots suggest that the residuals may have non-constant variance.
+**Influence:** The 'Residuals vs Leverage' plot does not indicate that the model is unduly influenced by a small number of data points.
+
+These diagnostic checks imply that a simple linear regression model may not be the best fit for the data. It might be beneficial to explore transformations of the response variable or the predictors, to consider alternative models that are more robust to these issues (like generalized linear models), or to include other variables that could explain the observed patterns and variability.
+
+
+# Remove outliers from the data and repeat the modeling.
+```{r}
+library(dplyr)
+library(readr)
+
+# Convert 'date_of_interest' to Date type and filter for 2021 and 2022
+covid_data_2021_2022_filtered <- covid_data_2021_2022 %>%
+  mutate(date_of_interest = as.Date(date_of_interest, format = "%Y-%m-%d")) %>%
+  filter(format(date_of_interest, "%Y") %in% c("2021", "2022"))
+
+# Function to remove outliers
+remove_outliers <- function(df, column) {
+  Q1 <- quantile(df[[column]], 0.25)
+  Q3 <- quantile(df[[column]], 0.75)
+  IQR <- Q3 - Q1
+  lower_bound <- Q1 - 1.5 * IQR
+  upper_bound <- Q3 + 1.5 * IQR
+  df %>%
+    filter(df[[column]] >= lower_bound, df[[column]] <= upper_bound)
+}
+
+# Apply the function to 'case_count', 'hospitalized_count', and 'death_count'
+covid_data_2021_2022_no_outliers <- covid_data_2021_2022_filtered %>%
+  remove_outliers('case_count') %>%
+  remove_outliers('hospitalized_count') %>%
+  remove_outliers('death_count')
+
+# View the first few rows of the cleaned data
+head(covid_data_2021_2022_no_outliers)
+
+```
+
+
+## Summary Statistics Without Outliers
+Compared with the summary statistics with outliers, the summary statistics below shows considerable less variability in daily cases, hospitalizations, and deaths. This likely reflect the waves and changing dynamics of the COVID-19 pandemic during 2021 and 2022 on the data. The median of all three metrics (cases, hospitalizations, deaths) are abot equal to the mean when outliers are removed, pointing to a right-skewed distribution.The right-skewed distributions suggest that most days were on the lower end of the spectrum, but there were periods with significantly higher counts.
+The wide range between the minimum and maximum values for each metric highlights the fluctuating intensity of the pandemic over these years.
+```{r}
+library(dplyr)
+
+# Selecting relevant columns for the analysis
+relevant_data_2021_2022_no_outliers <- select(covid_data_2021_2022_no_outliers, case_count, hospitalized_count, death_count)
+
+# Generating summary statistics for the selected columns (2021 and 2022 data)
+summary_statistics_no_outliers <- relevant_data_2021_2022_no_outliers %>%
+  summarise(across(c(case_count, hospitalized_count, death_count),
+                   list(mean = ~ mean(., na.rm = TRUE),
+                        median = ~ median(., na.rm = TRUE),
+                        sd = ~ sd(., na.rm = TRUE),
+                        min = ~ min(., na.rm = TRUE),
+                        max = ~ max(., na.rm = TRUE),
+                        n = ~ sum(!is.na(.))))) %>%
+  pivot_longer(cols = everything(), names_to = c(".value", "statistic"), names_pattern = "(.*)_(.*)")
+
+# Display the summary statistics
+print(summary_statistics_no_outliers)
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(gridExtra)
+
+# Function to create combined histogram and box plot
+combined_plot <- function(data, column_name, title, xlabel) {
+  numeric_data <- data[[column_name]]
+
+  histogram_plot <- ggplot(data.frame(x = numeric_data), aes(x = x)) +
+                    geom_histogram(bins = 60, fill = 'skyblue', alpha = 0.7) +
+                    labs(title = title, x = xlabel, y = 'Frequency') +
+                    theme_minimal()
+
+  boxplot_plot <- ggplot(data.frame(x = numeric_data), aes(x = x, y = '')) +
+                  geom_boxplot(fill = 'lightgreen') +
+                  labs(y = 'Value') +
+                  theme_minimal() +
+                  theme(axis.title.x = element_blank(),
+                        axis.text.x = element_blank(),
+                        axis.ticks.x = element_blank())
+
+  list(histogram_plot, boxplot_plot)
+}
+
+# Generate plots for each column
+case_count_plots <- combined_plot(covid_data_2021_2022_no_outliers, 'case_count', 'Histogram and Box Plot of Case Count (2021-2022) without Outliers', 'Case Count')
+hospitalized_count_plots <- combined_plot(covid_data_2021_2022_no_outliers, 'hospitalized_count', 'Histogram and Box Plot of Hospitalized Count (2021-2022) without Outliers', 'Hospitalized Count')
+death_count_plots <- combined_plot(covid_data_2021_2022_no_outliers, 'death_count', 'Histogram and Box Plot of Death Count (2021-2022) without Outliers', 'Death Count')
+
+# Arrange all plots in a grid layout
+grid.arrange(grobs = c(case_count_plots, hospitalized_count_plots, death_count_plots), ncol = 2)
+
+
+```
+
+
+### Multiple Linear Regression
+
+```{r}
+library(ggplot2)
+
+# Applying a log-plus-one transformation to the variables
+covid_data_2021_2022_no_outliers$log_death_count <- log1p(covid_data_2021_2022_no_outliers$death_count)
+covid_data_2021_2022_no_outliers$log_hospitalized_count <- log1p(covid_data_2021_2022_no_outliers$hospitalized_count)
+covid_data_2021_2022_no_outliers$log_case_count <- log1p(covid_data_2021_2022_no_outliers$case_count)
+
+# Adding 1 to the death count to avoid taking the log of zero
+covid_data_2021_2022_no_outliers['log_death_count'] = log1p(covid_data_2021_2022_no_outliers['death_count'])
+
+# Fit the model with the transformed response variable
+model_transformed_no_outliers <- lm(log_death_count ~ hospitalized_count + case_count, data = covid_data_2021_2022_no_outliers)
+
+# Summary of the transformed model
+summary(model_transformed_no_outliers)
+
+
+```
+
+## Diagnostic plots and analysis.
+
+```{r conducting dignostic on m_final model above}
+# Add residuals and fitted values to the data frame
+covid_data_2021_2022_no_outliers <- covid_data_2021_2022_no_outliers %>%
+  mutate(fitted_values = fitted(model_transformed_no_outliers),
+         residuals = resid(model_transformed_no_outliers),
+         sqrt_abs_resid = sqrt(abs(residuals)),
+         leverage = hatvalues(model_transformed_no_outliers))
+
+# Creating the plots
+p16_1 <- ggplot(covid_data_2021_2022_no_outliers, aes(x = fitted_values, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  labs(title = "Residuals vs Fitted", x = "Fitted values", y = "Residuals")
+
+p16_2 <- ggplot(covid_data_2021_2022_no_outliers, aes(sample = residuals)) +
+  stat_qq() +
+  stat_qq_line(slope=1, intercept=0, color="red", linetype="dashed") +
+  labs(title = "Normal Q-Q", x = "Theoretical Quantiles", y = "Sample Quantiles")
+
+p16_3 <- ggplot(covid_data_2021_2022_no_outliers, aes(x = fitted_values, y = sqrt_abs_resid)) +
+  geom_point() +
+  labs(title = "Scale-Location Plot", x = "Fitted values", y = "Sqrt(|Residuals|)")
+
+p16_4 <- ggplot(covid_data_2021_2022_no_outliers, aes(x = leverage, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  labs(title = "Residuals vs Leverage", x = "Leverage", y = "Residuals")
+
+grid.arrange(p16_1, p16_2, p16_3, p16_4, ncol = 2, nrow = 2)
+```
+
+```{r}
+library(ggplot2)
+
+# Applying a log-plus-one transformation to the variables
+covid_data_2021_2022$log_death_count <- log1p(covid_data_2021_2022$death_count)
+covid_data_2021_2022$log_hospitalized_count <- log1p(covid_data_2021_2022$hospitalized_count)
+covid_data_2021_2022$log_case_count <- log1p(covid_data_2021_2022$case_count)
+
+# Fit the model with the transformed variables
+model_transformed <- lm(log_death_count ~ log_hospitalized_count + log_case_count, data = covid_data_2021_2022)
+
+# Summary of the transformed model
+summary(model_transformed)
+
+
+
+```
+
+```{r}
+# Diagnostic plots
+par(mfrow = c(2, 2))
+plot(model_transformed)
+```
+
+## Diagnostic plots and analysis with outliers.
+
+```{r conducting dignostic on m_final model above}
+# Add residuals and fitted values to the data frame
+covid_data_2021_2022 <- covid_data_2021_2022 %>%
+  mutate(fitted_values = fitted(model_transformed),
+         residuals = resid(model_transformed),
+         sqrt_abs_resid = sqrt(abs(residuals)),
+         leverage = hatvalues(model_transformed))
+
+# Creating the plots
+p16_1 <- ggplot(covid_data_2021_2022, aes(x = fitted_values, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  labs(title = "Residuals vs Fitted", x = "Fitted values", y = "Residuals")
+
+p16_2 <- ggplot(covid_data_2021_2022, aes(sample = residuals)) +
+  stat_qq() +
+  stat_qq_line(slope=1, intercept=0, color="red", linetype="dashed") +
+  labs(title = "Normal Q-Q", x = "Theoretical Quantiles", y = "Sample Quantiles")
+
+p16_3 <- ggplot(covid_data_2021_2022, aes(x = fitted_values, y = sqrt_abs_resid)) +
+  geom_point() +
+  labs(title = "Scale-Location Plot", x = "Fitted values", y = "Sqrt(|Residuals|)")
+
+p16_4 <- ggplot(covid_data_2021_2022, aes(x = leverage, y = residuals)) +
+  geom_point() +
+  geom_hline(yintercept=0, color="red", linetype="dashed") +
+  labs(title = "Residuals vs Leverage", x = "Leverage", y = "Residuals")
+
+grid.arrange(p16_1, p16_2, p16_3, p16_4, ncol = 2, nrow = 2)
+```
+
+# Generalized Linear Models (GLM)
+Since the Linear Regression model does not seem to be appropiate for the count data, We will explore Generalized Linear Models. Generalized Linear Models (GLM) extend linear regression to models with a non-normal response distribution. For count data like 'death_count', a Poisson or negative binomial GLM can be appropriate since these distributions are commonly used for modeling count data.We will start with the Poison Model
+
+# Generalized Poisson model
+We will use the GLM functions fit a GLM to the data with a Poisson error distribution, which is appropriate for count data. 
+
+```{r}
+library(MASS)
+
+# Convert date_of_interest to Date type and filter for 2021 and 2022
+covid_data$date_of_interest <- as.Date(covid_data$date_of_interest, format="%Y-%m-%d")
+covid_data <- subset(covid_data, format(date_of_interest, "%Y") %in% c("2021", "2022"))
+
+# Log-transform the independent variables
+covid_data$log_hospitalized_count <- log1p(covid_data$hospitalized_count)
+covid_data$log_case_count <- log1p(covid_data$case_count)
+
+# Fit a Poisson GLM with a log link
+poisson_model <- glm(death_count ~ log_hospitalized_count + log_case_count, 
+                     family = poisson(link = "log"), data = covid_data)
+
+# Model summary
+summary(poisson_model)
+
+
+```
+## Equation of the Poison Model
+
+\[
+  \log(\lambda) = 0.11523 + 1.72372 \cdot \text{log_hospitalized_count} - 0.72909 \cdot \text{log_case_count}
+\]
+
+To find the expected number of deaths (λ), you would exponentiate both sides of this equation, leading to:
+
+\[
+\lambda = \exp(0.11523 + 1.72372 \cdot \text{log_hospitalized_count} - 0.72909 \cdot \text{log_case_count})
+\]
+
+
+## Statistical Significance:
+The model shows statistical significance as indicated by the p-values., practical significance depends on the context.
+
+## Practical Significance of the model:
+The coefficients for log_hospitalized_count and log_case_count are 1.72372 and -0.72909, respectively. These values are substantial, suggesting that changes in the predictors have a notable effect on the expected number of deaths. Particularly, the positive coefficient for log_hospitalized_count indicates a strong positive relationship with the expected death count. The negative coefficient for log_case_count is less intuitive but may suggest that as the overall number of cases increases, the proportion resulting in death decreases, possibly due to improved treatments, increased testing leading to the identification of milder cases.
+
+## Model Fit and Predictive Power:
+The drop from the null deviance to the residual deviance suggests a good model fit. However, the practical significance also depends on how well the model predicts new or unseen data. This would require validation using separate data.
+
+## conclusion
+While the model appears to have statistical significance and the coefficients suggest meaningful relationships, whether it is practically significant for predicting the expected number of deaths depends on the accuracy of its predictions in real-world scenarios and the context in which it is being used.
+
+## diagnostics for the Generalized Poisson model
+Below are the diagnostic plots. Below the plots are the interpretation of each plot.
+
+```{r}
+# Diagnostic plots
+par(mfrow = c(2, 2))
+plot(poisson_model)
+```
+**Residuals vs Fitted Plot:**
+In this plot, there seems to be a funnel shape with a wider spread of residuals as the fitted values increase, indicating potential overdispersion or a non-linear relationship not captured by the model.
+
+**Normal Q-Q Plot:**
+The points in the plot follow the line closely except for the upper tail (high quantiles), suggesting that high values may not be fitting as well, which could also be a sign of overdispersion.
+
+**Scale-Location Plot (or Spread-Location Plot):**
+The plot indicates that variability of the residuals increases with the fitted values, another potential sign of overdispersion.
+
+**Residuals vs Leverage Plot:**
+In this plot, there don't appear to be any points beyond the Cook's distance lines, suggesting there are no highly influential outliers.
+
+Based on these diagnostics, there are signs of overdispersion in the data, which is common in count data. Overdispersion occurs when the variance is greater than the mean, which violates the Poisson assumption of equal mean and variance. This can lead to underestimating the standard errors of the coefficients, resulting in overly optimistic p-values.
+
+# Generalized Linear Model (GLM) with a negative binomial distribution
+Next, we will use the Negative Binomial Generalized Linear Model (GLM) for the count data since there is evidence of overdispersion, which seems to be the case based on the above Poison model diagnostics. The negative binomial model has an additional parameter to model the overdispersion, making it more flexible than the Poisson model for such data.
+
+```{r}
+library(MASS)
+
+# Convert date_of_interest to Date type and filter for 2021 and 2022
+covid_data$date_of_interest <- as.Date(covid_data$date_of_interest)
+covid_data <- subset(covid_data, format(date_of_interest, "%Y") %in% c("2021", "2022"))
+
+# Log-transform the independent variables (plus one to avoid log(0))
+covid_data$log_hospitalized_count <- log1p(covid_data$hospitalized_count)
+covid_data$log_case_count <- log1p(covid_data$case_count)
+
+# Fit a Negative Binomial GLM with log-transformed independent variables
+neg_binom_model <- glm.nb(death_count ~ log_hospitalized_count + log_case_count, data = covid_data)
+
+# Model summary
+summary(neg_binom_model)
+```
+## Equation of the GLM with Negative Binomial Disribution.
+
+\[
+  \widehat{Death\_Count}=exp(0.48015+1.59602×log(Hospitalized\_Count)−0.69407×log(Case\_Count))
+\]
+
+
+**Statistical Significance**
+The low p-values (p-value = 0.00135) for the coefficients suggest that the model is statistically significant in predicting the death_count variable.
+
+**Practical Significance**
+The magnitudes of the coefficients (1.59602 for hospitalized count and -0.69407 for case count) are substantial, especially given that they are on a logarithmic scale. This implies that changes in the log of hospitalized and case counts have meaningful impacts on the death count.
+
+
+**Model Fit**
+1. Null Deviance (2627.13): Represents the deviance of the model with only the intercept (no predictors). It's the baseline to  compare.
+2. Residual Deviance (713.81): Represents the deviance of the model with predictors. The significant drop from 2627.13 to 713.81 suggests a good fit.
+3. AIC (Akaike Information Criterion) - 4896.1: Lower AIC values indicate a better model. The substantial decrease in deviance suggests a good fit.
+
+**Predictive Power**
+The low residual deviance relative to the null deviance and the significance of the coefficients suggest that the model has good predictive power.
+
+## Comparison with the Poison Model
+Theta (Dispersion parameter): A value of 4.667 with a standard error of 0.326 indicates that the negative binomial distribution is appropriate (suggesting overdispersion in the data which would not be well modeled by a Poisson distribution).
+
+## Conclusion for GLM with Negative Binomial Distribution
+The model appears to be both statistically and practically significant in predicting death_count based on log_hospitalized_count and log_case_count. It fits the data well and should have good predictive power.
+
+## diagnostics for the Generalized Linear Model (GLM) with a negative binomial distribution
+Next we generate and interpret the diagnostic plots for the Generalized Linear Model (GLM) with a negative binomial distribution above. Below the plots is the interpretation each of the plots:
+
+```{r}
+
+# Diagnostic plots
+par(mfrow = c(2, 2))
+plot(neg_binom_model)
+```
+
+**Residuals vs Fitted:**
+The plot shows a random scatter of residuals around the horizontal line, which is good. However, some points are lying outside the expected range, which could be outliers or indicate overdispersion.
+
+**Q-Q Residuals:**
+The clear deviation at the upper tail indicates that the residuals have heavier tails than expected if they were normally distributed, which is common for count data and consistent with the negative binomial distribution's allowance for overdispersion.
+
+**Scale-Location:**
+The plot indicates increasing spread with the fitted values, suggesting some degree of heteroscedasticity.
+
+**Residuals vs Leverage:**
+The plot shows a few points with higher leverage, but they do not coincide with large residuals, suggesting they may not be having a significant influence on the model.
+
+**Overall Interpretation:**
+The diagnostic plots indicate that while the negative binomial model may be accounting for overdispersion (as suggested by the residuals being better behaved than in the Poisson model), there are still some issues:
+
+There might be outliers or points that are not well accounted for by the model, as indicated by the points lying outside the expected range in the Residuals vs Fitted plot and the heavy tails in the Q-Q plot.The variance of residuals might not be constant, as indicated by the Scale-Location plot. The Residuals vs Leverage plot does not raise immediate concerns about influential outliers, but it is always good practice to investigate any points with high leverage or high residuals to ensure they are not unduly affecting the model.
+
+# Conclusion
+
+## Importance of the analysis
+This analysis is crucial as it enhances our understanding of COVID-19's impact and informs public health responses. By scrutinizing daily counts of cases, hospitalizations, and deaths from 2021 to 2022, the study aimed to identify a statistically robust model that accurately captures the relationships within the data. The Negative Binomial regression model emerged as the most appropriate, addressing the overdispersion and skewness typical in count data, which standard linear and Poisson models failed to accommodate.
+
+## Limitations of the analysis
+However, the analysis has limitations. It did not account for variables like demographic factors or healthcare accessibility, which can influence COVID-19 outcomes. It was also limited to a specific timeframe and did not include time-series considerations, potentially overlooking trends and patterns over time. Furthermore, the assumption of independent observations may not hold true due to the interconnected nature of epidemiological data.
+
+In summary, while the study improved the modeling of COVID-19 data by using a Negative Binomial regression, its insights are constrained by the scope of variables considered and the methodology's inherent assumptions. Future analysis could benefit from a more holistic approach, incorporating a broader range of factors and advanced modeling techniques.
